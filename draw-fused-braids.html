@@ -1,0 +1,342 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fused braids</title>
+<style>
+#braidPictures {
+	display: flex;
+	flex-flow: row;
+}
+
+#braidPictures canvas {
+	display:block;
+	margin:2px;
+}
+</style>
+</head>
+<body>
+<ul>
+<li>The leftmost generator is drawn topmost.</li>
+<li>"front" versions of fuses are drawn with a dot, "back" with a box.</li>
+<li>Regular versions of fuses are drawn filled, formal inverses are drawn empty.</li>
+<li><code>si(2,2)</code> cross strand i over i+1. (TODO: get rid of dummy 2,2, its just a hack for the parser.)</li>
+<li><code>Si(2,2)</code> cross strand i under i+1.</li>
+<li><code>pi(j,k)</code> fuses strands i through i+j-1 on the bottom and i through i+k-1 on the top of the fuse ("front" version).</li>
+<li><code>qi(j,k)</code> fuses strands i through i+j-1 on the bottom and i through i+k-1 on the top of the fuse ("back" version).</li>
+<li><code>Pi</code> and <code>Qi</code> are the respective inverses.</li>
+<!-- <li><code>ei</code> does nothing with strand i (use to pad braid in height/width).</li> -->
+<li>Multiple lines are treated as multiple frames of an animation (animation will be sized relative to largest frame)</li>
+</ul>
+<textarea id="braidText" cols="80">
+s2(2,2) P3(0,3) Q2(4,1) s1(2,2) S3(2,2) p2(2,1) q1(1,3) S1(2,2):test_tag</textarea></br>
+<div id="braidPictures">
+<canvas id="braidPicture"></canvas>
+</div>
+<button id="download">Download</button>
+
+<script>
+function drawFusedBraid(braid, canvas) {
+	console.log("drawing", braid, "on", canvas);
+
+	let inStrands = braid.inStrands;
+	let maxStrands = braid.maxStrands;
+	console.log("Starting strands: " + inStrands + ", max width: " + maxStrands);
+
+	const SCALE = 6;
+	const MARGIN = 3 * SCALE;
+	const OP_HEIGHT = 15 * SCALE;
+	const STRAND_SPACING = 10 * SCALE;
+	const STRAND_WIDTH = 1 * SCALE;
+
+	const GRID_WEIGHT = .4 * SCALE;
+
+	canvas.height = 2 * MARGIN + OP_HEIGHT * braid.height;
+	canvas.width = 2 * MARGIN + STRAND_SPACING * braid.width;
+
+	const ctx = canvas.getContext('2d', {alpha:false});
+	ctx.width = parseInt(canvas.width);
+	ctx.height = parseInt(canvas.height);
+
+	ctx.fillStyle = '#888';
+	ctx.fillRect(0,0,ctx.width,ctx.height);
+
+	ctx.transform(1,0, 0,-1, 0.5 * STRAND_SPACING + STRAND_SPACING * 0.5 * (braid.width - braid.maxStrands),ctx.height);
+
+	//draw reference grid
+	ctx.beginPath();
+	const y0 = 0;
+	const y1 = ctx.height;
+	for (let i=0; i<braid.maxStrands; ++i) {
+		let x0 = i * STRAND_SPACING + MARGIN;
+		ctx.moveTo(x0, y0);
+		ctx.lineTo(x0, y1);
+	}
+	const x0 = 0;
+	const x1 = ctx.width;
+	for (let i=0; i<braid.length; i++) {
+		let y0 = i * OP_HEIGHT + MARGIN;
+		ctx.moveTo(x0,y0);
+		ctx.lineTo(x1,y0);
+	}
+	ctx.strokeStyle = '#ddd';
+	ctx.lineWidth = GRID_WEIGHT;
+	ctx.stroke();
+
+	let circleFuse = [];
+	let circleInv = [];
+	let squareFuse = [];
+	let squareInv = [];
+
+	ctx.beginPath();
+	let strands = inStrands;
+
+	let y;
+	{
+		const y0 = 0.5 * MARGIN;
+		const y1 = MARGIN + OP_HEIGHT * 0.5 * (braid.height - braid.length);
+		for (let i = 0; i < strands; ++i) {
+			let x0 = i * STRAND_SPACING + MARGIN;
+			let x1 = i * STRAND_SPACING + MARGIN;
+			ctx.moveTo(x0, y0);
+			ctx.lineTo(x0, y1);
+		}
+		y = y1;
+	}
+
+
+	for (let op of braid) {
+		const y0 = y;
+		const y1 = y0 + OP_HEIGHT;
+
+		//everything left draws straight up:
+		for (let i = 0; i < op.at; ++i) {
+			let x0 = i * STRAND_SPACING + MARGIN;
+			let x1 = i * STRAND_SPACING + MARGIN;
+			ctx.moveTo(x0, y0);
+			ctx.lineTo(x0, y1);
+		}
+
+		//actual op:
+		if (op.type === 's') {
+			let x0 = op.at * STRAND_SPACING + MARGIN;
+			let x1 = (op.at+1) * STRAND_SPACING + MARGIN;
+			ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+			ctx.moveTo(x1, y0); ctx.lineTo(0.25 * (x0 - x1) + x1, 0.25 * (y1 - y0) + y0);
+			ctx.moveTo(0.75 * (x0 - x1) + x1, 0.75 * (y1 - y0) + y0); ctx.lineTo(x0, y1);
+		} else if (op.type === 'S') {
+			let x1 = op.at * STRAND_SPACING + MARGIN;
+			let x0 = (op.at+1) * STRAND_SPACING + MARGIN;
+			ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+			ctx.moveTo(x1, y0); ctx.lineTo(0.25 * (x0 - x1) + x1, 0.25 * (y1 - y0) + y0);
+			ctx.moveTo(0.75 * (x0 - x1) + x1, 0.75 * (y1 - y0) + y0); ctx.lineTo(x0, y1);
+		} else if (op.type === 'p' || op.type === 'P' || op.type === 'q' || op.type === 'Q') {
+			let op_wide = Math.max(op.in-1, op.out-1, 0);
+			let xo = (op.at + 0.5 * op_wide) * STRAND_SPACING + MARGIN;
+			let yo = 0.5 * (y1 + y0);
+			for (let i = op.at; i < op.at + op.in; ++i) {
+				let xi = i * STRAND_SPACING + MARGIN;
+				ctx.moveTo(xi, y0); ctx.lineTo(xo, yo);
+			}
+
+			for (let i = op.at; i < op.at + op.out; ++i) {
+				let xi = i * STRAND_SPACING + MARGIN;
+				ctx.moveTo(xo, yo); ctx.lineTo(xi, y1);
+			}
+
+			if (op.type === 'p') {
+				circleFuse.push({x:xo, y:yo});
+			} else if (op.type === 'q')  {
+				squareFuse.push({x:xo, y:yo});
+			} else if (op.type === 'P') {
+				circleInv.push({x:xo, y:yo});
+			} else {
+				squareInv.push({x:xo, y:yo});
+			}
+		} else {
+			console.log("TODO: " + op.type);
+		}
+
+		//everything right draws straight up:
+		for (let i = op.at + op.in; i < strands; ++i) {
+			let x0 = i * STRAND_SPACING + MARGIN;
+			let x1 = (i - op.in + op.out) * STRAND_SPACING + MARGIN;
+			ctx.moveTo(x0, y0);
+			ctx.lineTo(x1, y1);
+		}
+
+		strands += op.out - op.in;
+
+		y = y1;
+	}
+
+	{
+		const y0 = y;
+		const y1 = ctx.height - 0.5 * MARGIN;
+		for (let i = 0; i < strands; ++i) {
+			let x0 = i * STRAND_SPACING + MARGIN;
+			let x1 = i * STRAND_SPACING + MARGIN;
+			ctx.moveTo(x0, y0);
+			ctx.lineTo(x0, y1);
+		}
+		y = y1;
+	}
+
+	ctx.lineCap = 'round';
+	ctx.strokeStyle = '#000';
+	ctx.lineWidth = STRAND_WIDTH;
+	ctx.stroke();
+
+	ctx.beginPath();
+	for (let pt of circleFuse) {
+		ctx.ellipse(pt.x, pt.y, 1.5 * STRAND_WIDTH, 1.5 * STRAND_WIDTH, 0.0, 0.0, 2.0 * Math.PI);
+		ctx.closePath();
+	}
+	ctx.fillStyle = '#000';
+	ctx.fill();
+
+	ctx.beginPath();
+	for (let pt of circleInv) {
+		ctx.moveTo(pt.x + 1.0 * STRAND_WIDTH, pt.y);
+		ctx.ellipse(pt.x, pt.y, 1.0 * STRAND_WIDTH, 1.0 * STRAND_WIDTH, 0.0, 0.0, 2.0 * Math.PI);
+		ctx.closePath();
+	}
+	ctx.fillStyle = '#fff';
+	ctx.fill();
+	ctx.strokeStyle = '#000';
+	ctx.lineWidth = STRAND_WIDTH;
+	ctx.stroke();
+
+	ctx.beginPath();
+	for (let pt of squareFuse) {
+		const R = 1.7 * STRAND_WIDTH;
+		ctx.moveTo(pt.x - R, pt.y);
+		ctx.lineTo(pt.x, pt.y + R);
+		ctx.lineTo(pt.x + R, pt.y);
+		ctx.lineTo(pt.x, pt.y - R);
+		ctx.closePath();
+	}
+	ctx.fillStyle = '#000';
+	ctx.fill();
+
+	ctx.beginPath();
+	for (let pt of squareInv) {
+		const R = 1.7 * STRAND_WIDTH - 0.5 * STRAND_WIDTH;
+		ctx.moveTo(pt.x - R, pt.y);
+		ctx.lineTo(pt.x, pt.y + R);
+		ctx.lineTo(pt.x + R, pt.y);
+		ctx.lineTo(pt.x, pt.y - R);
+		ctx.closePath();
+	}
+	ctx.fillStyle = '#fff';
+	ctx.fill();
+	ctx.strokeStyle = '#000';
+	ctx.lineWidth = STRAND_WIDTH;
+	ctx.stroke();
+}
+
+function parseFusedBraid(text) {
+	let braid = [];
+	for (const op of text.split(/\s+/)) {
+		if (op === "") continue;
+		const m = op.match(/^([sSpPqQ])(\d+)\((\d+),(\d+)\)(:.*)?$/);
+		if (!m) throw new Error("Failed to parse: '" + op + "'");
+		console.log(m);
+		const type = m[1];
+		const at = parseInt(m[2])-1;
+		const inverse = (type == type.toUpperCase());
+		const ins = inverse ? parseInt(m[4]) : parseInt(m[3]);
+		const outs = inverse ? parseInt(m[3]) : parseInt(m[4]);
+		const tag = (m[5] ? m[5].substr(1) : '');
+
+		braid.push({
+			type:type,
+			inverse:inverse,
+			at:at,
+			in:ins,
+			out:outs
+		});
+	}
+	//put braid in order-of-operations order instead of reading order:
+	braid.reverse();
+
+	//compute braid's starting strands, max width, height:
+	let inStrands = 0;
+	let maxStrands = 0;
+	//run braid to figure out how many strands are mentioned:
+	{
+		let strands = 0; //current number of strands
+		let delta = 0; //net strand count change since the start
+		for (let op of braid) {
+			strands = Math.max(strands, op.at + op.in); //expand as needed for this op to have an input
+			inStrands = Math.max(inStrands, strands - delta); //how many strands at start for this to be possible?
+			maxStrands = Math.max(maxStrands, strands); //how many strands right now?
+			delta += op.out - op.in;
+			strands += op.out - op.in; //account for op
+		}
+		maxStrands = Math.max(maxStrands, strands); //how many strands right now?
+	}
+
+	braid.inStrands = inStrands;
+	braid.maxStrands = maxStrands;
+	braid.height = braid.length;
+	braid.width = braid.maxStrands;
+
+	return braid;
+}
+function parseFusedBraids(text) {
+	let braids = [];
+	let maxWidth = 0;
+	let maxHeight = 0;
+	let maxInStrands = 0;
+	for (const line of text.split("\n")) {
+		const braid = parseFusedBraid(line);
+		maxHeight = Math.max(maxHeight, braid.height);
+		maxWidth = Math.max(maxWidth, braid.width);
+		maxInStrands = Math.max(maxInStrands, braid.inStrands);
+		braids.push(braid);
+	}
+	for (const braid of braids) {
+		braid.height = maxHeight;
+		braid.width = maxWidth;
+		braid.maxStrands += maxInStrands - braid.inStrands;
+		braid.inStrands = maxInStrands;
+	}
+	return braids;
+}
+
+let braids = [];
+
+function update() {
+	braids = parseFusedBraids(document.getElementById("braidText").value);
+	const braidPictures = document.getElementById("braidPictures");
+	braidPictures.innerHTML = "";
+	for (const braid of braids) {
+		const canvas = document.createElement("CANVAS");
+		drawFusedBraid(braid, canvas);
+		braidPictures.appendChild(canvas);
+		braid.canvas = canvas;
+	}
+}
+
+document.getElementById("braidText").addEventListener('input', (evt) => {
+	update();
+});
+
+update();
+
+document.getElementById("download").addEventListener('click', () => {
+	console.log("Download?");
+	for (let i = 0; i < braids.length; ++i) {
+		const data = braids[i].canvas.toDataURL('image/png');
+		const a = document.createElement("a");
+		a.download = `frame${i}.png`;
+		a.href = data;
+		a.click();
+	}
+});
+
+
+</script>
+</body>
+</html>
